@@ -1,3 +1,316 @@
 /include/ "system-conf.dtsi"
 / {
+	misc_clk_a: misc_clk_a {
+		#clock-cells = <0>;
+		clock-frequency = <12000000>;
+		compatible = "fixed-clock";
+	};
+	cam_reg_1v8: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+	cam_reg_2v8: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "2v8";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+	};
+	cam_reg_1v5: regulator-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "1v5";
+		regulator-min-microvolt = <1500000>;
+		regulator-max-microvolt = <1500000>;
+	};
+
 };
+
+&i2c1 {
+        clock-frequency = <400000>;
+        eeprom@50{
+                compatible = "atmel,24c04";
+                reg = <0x50>;
+                pagesize = <16>;
+        };
+};
+
+&i2c1 {
+        clock-frequency = <400000>;
+        lm75@48 {
+                compatible = "nxp,lm75";
+                reg = <0x48>;
+        };
+};
+
+&qspi {
+        status = "okay";
+};
+
+&flash0 {
+	is-dual = <0>;
+	num-cs = <1>;
+	spi-rx-bus-width = <4>;
+        spi-tx-bus-width = <4>;
+        compatible ="jedec,spi-nor";
+        reg= <0x0>;
+};
+
+&gem3 {
+	phy-handle = <&phy0>;
+    local-mac-address = [00 0a 35 00 22 01];
+	phy0: ethernet-phy@c {
+		reg = <0x0>;
+	};
+};
+
+&axi_ethernet_0 {
+	phy-handle = <&phy2>;
+};
+
+&axi_ethernet_0_mdio {
+	phy2: phy@2 {
+		device_type = "ethernet-phy";
+		reg = <1>;
+	};
+};
+
+&i2c0 {
+	ov5640: camera@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+		clocks = <&misc_clk_a>;
+		clock-names = "xclk";
+		/* rotation = <180>; */
+		DOVDD-supply = <&cam_reg_1v8>;
+		AVDD-supply = <&cam_reg_2v8>;
+		DVDD-supply = <&cam_reg_1v5>;
+		port {
+			/* MIPI CSI-2 bus endpoint */
+			ov5640_to_mipi_csi2: endpoint {
+				remote-endpoint = <&csiss_in>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+
+&mipi_csi2_rx_subsyst_0{
+	compatible = "xlnx,mipi-csi2-rx-subsystem-2.0";
+	csiss_ports: ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		csiss_port0: port@0 {
+			reg = <0>;
+
+			xlnx,video-format = <0>;
+			xlnx,video-width = <8>;
+
+			csiss_out: endpoint {
+				remote-endpoint = <&csc_in>;
+			};
+		};
+		csiss_port1: port@1 {
+			reg = <1>;
+
+			xlnx,video-format = <0>;
+			xlnx,video-width = <8>;
+
+			csiss_in: endpoint {
+				data-lanes = <1 2>;
+				remote-endpoint = <&ov5640_to_mipi_csi2>;
+			};
+		};
+	};
+};
+
+&v_proc_ss_0{
+	compatible = "xlnx,v-vpss-csc";
+	reset-gpios = <&gpio 86 1>;
+	csc_ports: ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		csc_port0: port@0 {
+			reg = <0>;
+			xlnx,video-format = <3>;
+			xlnx,video-width = <8>;
+			csc_in: endpoint {
+				remote-endpoint = <&csiss_out>;
+			};
+		};
+		csc_port1: port@1 {
+			reg = <1>;
+			xlnx,video-format = <3>;
+			xlnx,video-width = <8>;
+			csc_out: endpoint {
+				remote-endpoint = <&vcap_in>;
+			};
+		};
+	};
+};
+
+
+&v_frmbuf_wr_0 {
+	compatible = "xlnx,axi-frmbuf-wr-v2.1";
+	reset-gpios = <&gpio 85 1>;
+};
+
+&amba_pl {
+	vcap_mipi {
+		compatible = "xlnx,video";
+		dma-names = "port0";
+		dmas = <&v_frmbuf_wr_0 0>;
+		vcap_ports: ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vcap_port: port@0 {
+				direction = "input";
+				reg = <0>;
+				vcap_in: endpoint {
+					remote-endpoint = <&csc_out>;
+				};
+			};
+		};
+	};
+	/* The FPD thermal diode is remotely located near the APUs */
+	temp_apu: thermal-sensor@ffa50a14 {
+		compatible = "xlnx,zynqmp-pssysmon-temp";
+		#thermal-sensor-cells = <0>;
+		reg = <0x0 0xffa50a14 0x0 0x2>;
+		type = "temp-sensor";
+		id = <0>;
+	};
+	/* The thermal diode is located in the PL SysMon unit */
+	temp_pl: thermal-sensor@ffa50c00 {
+		compatible = "xlnx,zynqmp-pssysmon-temp";
+		#thermal-sensor-cells = <0>;
+		reg = <0x0 0xffa50c00 0x0 0x2>;
+		type = "temp-sensor";
+		id = <0>;
+	};
+	/* The LPD thermal diode is located in the PS SysMon unit near the RPU */
+	temp_ps: thermal-sensor@ffa50800 {
+		compatible = "xlnx,zynqmp-pssysmon-temp";
+		#thermal-sensor-cells = <0>;
+		reg = <0x0 0xffa50800 0x0 0x2>;
+		type = "temp-sensor";
+		id = <0>;
+	};
+};
+
+/* SD */
+&sdhci1 {
+	disable-wp;
+	no-1-8-v;
+};
+
+/* USB  */
+&dwc3_0 {
+    status = "okay";
+    dr_mode = "host";
+};
+
+/* USB  */
+&dwc3_0 {
+    status = "okay";
+    dr_mode = "host";
+};
+
+
+/ {
+
+	cooling_device: gpio-fan {
+		compatible = "xlnx,simple-gpio-fan";
+		type="cooling-fan";
+		status="okay";
+		//gpio-fan,speed-map = <0 1>, <8600 0>;
+		gpios = <&fan_gpio 0 GPIO_ACTIVE_HIGH>; // Assuming GPIO 0 in fan_gpio controls the fan, active low
+		#cooling-cells = <2>; /* 2 cells in the cooling map:
+								* 1st cell: cooling state (0 = off, 1 = on)
+								* 2nd cell: cooling level (arbitrary, usually ignored)
+								*/
+	};
+
+	thermal-zones {
+		apu_thermal: apu-thermal {
+			polling-delay = <1000>; // Poll every 1000 ms
+			polling-delay-passive = <500>; // More frequent polling in passive state
+			thermal-sensors = <&temp_apu>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			trips {
+				apu_crit: apu_crit {
+					temperature = <95000>; // Critical temperature in millicelsius
+					hysteresis = <2000>; // 2 degrees Celsius hysteresis
+					type = "critical";
+				};
+
+				apu_active: apu_active {
+					temperature = <65000>; // Passive cooling starts at 85C
+					hysteresis = <10000>;
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				apu_map0 {
+					trip = <&apu_active>;
+					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
+				};
+			};
+		};
+		pl_thermal: pl-thermal {
+			polling-delay = <1000>; // Poll every 1000 ms
+			polling-delay-passive = <500>; // More frequent polling in passive state
+			thermal-sensors = <&temp_pl>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			trips {
+				pl_crit: pl_crit {
+					temperature = <95000>; // Critical temperature in millicelsius
+					hysteresis = <0>; 
+					type = "critical";
+				};
+
+				pl_active: pl_active {
+					temperature = <65000>; // Passive cooling starts at 85C
+					hysteresis = <10000>; // 5 degrees Celsius hysteresis
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				pl_map0 {
+					trip = <&pl_active>;
+					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
+				};
+			};
+		};
+		ps_thermal: ps-thermal {
+			polling-delay = <1000>; // Poll every 1000 ms
+			polling-delay-passive = <500>; // More frequent polling in passive state
+			thermal-sensors = <&temp_ps>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			trips {
+				ps_crit: ps_crit {
+					temperature = <95000>; // Critical temperature in millicelsius
+					hysteresis = <0>; 
+					type = "critical";
+				};
+
+				ps_active: ps_active {
+					temperature = <65000>; // Passive cooling starts at 85C
+					hysteresis = <10000>; // 5 degrees Celsius hysteresis
+					type = "active";
+				};
+			};
+
+			cooling-maps {
+				ps_map0 {
+					trip = <&ps_active>;
+					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
+				};
+			};
+		};
+	};
+};
+
+
+
