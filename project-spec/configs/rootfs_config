@@ -4070,9 +4070,9 @@ CONFIG_packagegroup-petalinux-x11=y
 CONFIG_imagefeature-ssh-server-openssh=y
 CONFIG_imagefeature-hwcodecs=y
 # CONFIG_imagefeature-package-management is not set
-# CONFIG_imagefeature-debug-tweaks is not set
-# CONFIG_imagefeature-empty-root-password is not set
-# CONFIG_imagefeature-serial-autologin-root is not set
+CONFIG_imagefeature-debug-tweaks=y
+CONFIG_imagefeature-empty-root-password=y
+CONFIG_imagefeature-serial-autologin-root=y
 CONFIG_Init-manager-systemd=y
 # CONFIG_Init-manager-sysvinit is not set
 
@@ -4083,8 +4083,9 @@ CONFIG_Init-manager-systemd=y
 CONFIG_gstreamer-vcu-examples=y
 # CONFIG_gstreamer-vcu-notebooks is not set
 # CONFIG_peekpoke is not set
-CONFIG_zcu106-1.0=y
-CONFIG_zcu106-2.0=y
+CONFIG_simple-gpio-fan=y
+CONFIG_soft-pwm-fan=y
+CONFIG_zynqmp-pssysmon-temp=y
 
 #
 # PetaLinux RootFS Settings

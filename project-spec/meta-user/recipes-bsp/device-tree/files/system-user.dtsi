@@ -222,91 +222,96 @@
 / {
 
 	cooling_device: gpio-fan {
-		compatible = "xlnx,simple-gpio-fan";
-		type="cooling-fan";
-		status="okay";
-		//gpio-fan,speed-map = <0 1>, <8600 0>;
-		gpios = <&fan_gpio 0 GPIO_ACTIVE_HIGH>; // Assuming GPIO 0 in fan_gpio controls the fan, active low
-		#cooling-cells = <2>; /* 2 cells in the cooling map:
-								* 1st cell: cooling state (0 = off, 1 = on)
-								* 2nd cell: cooling level (arbitrary, usually ignored)
-								*/
+		compatible = "xlnx,soft-pwm-fan";
+		type = "cooling-fan";
+		status = "okay";
+		/*
+		 * Fan is wired active-low (driving the line to 0 turns the fan
+		 * on). Express that with GPIO_ACTIVE_LOW so the driver can use
+		 * plain logical levels (asserted == fan on).
+		 */
+		gpios = <&fan_gpio 0 GPIO_ACTIVE_LOW>;
+		num-levels = <10>;        /* cooling states 1..10 (0 = off)     */
+		min-duty-percent = <30>;  /* lowest duty that keeps it spinning */
+		pwm-frequency-hz = <100>; /* soft-PWM carrier frequency         */
+		#cooling-cells = <2>;     /* <min-state max-state> in the maps  */
 	};
 
+	/*
+	 * Proportional (soft-PWM) fan control. Each zone has a staircase of
+	 * active trips from 45 C to 75 C; the step_wise governor ramps the
+	 * cooling device across the state band bound at each trip, so fan speed
+	 * rises with temperature instead of slamming fully on. num-levels = 10,
+	 * so state bands span 0..10 (0 = off, 10 = full). 3 C hysteresis keeps
+	 * the staircase responsive without chattering. 95 C stays critical.
+	 * The thermal core drives the fan to the highest state any zone asks
+	 * for, so the hottest sensor wins.
+	 */
 	thermal-zones {
 		apu_thermal: apu-thermal {
-			polling-delay = <1000>; // Poll every 1000 ms
-			polling-delay-passive = <500>; // More frequent polling in passive state
-			thermal-sensors = <&temp_apu>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			polling-delay = <1000>;
+			polling-delay-passive = <500>;
+			thermal-sensors = <&temp_apu>;
 			trips {
 				apu_crit: apu_crit {
-					temperature = <95000>; // Critical temperature in millicelsius
-					hysteresis = <2000>; // 2 degrees Celsius hysteresis
+					temperature = <95000>;
+					hysteresis = <2000>;
 					type = "critical";
 				};
-
-				apu_active: apu_active {
-					temperature = <65000>; // Passive cooling starts at 85C
-					hysteresis = <10000>;
-					type = "active";
-				};
+				apu_t0: apu_t0 { temperature = <45000>; hysteresis = <3000>; type = "active"; };
+				apu_t1: apu_t1 { temperature = <55000>; hysteresis = <3000>; type = "active"; };
+				apu_t2: apu_t2 { temperature = <65000>; hysteresis = <3000>; type = "active"; };
+				apu_t3: apu_t3 { temperature = <75000>; hysteresis = <3000>; type = "active"; };
 			};
-
 			cooling-maps {
-				apu_map0 {
-					trip = <&apu_active>;
-					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
-				};
+				apu_map0 { trip = <&apu_t0>; cooling-device = <&cooling_device 0 3>; };
+				apu_map1 { trip = <&apu_t1>; cooling-device = <&cooling_device 3 6>; };
+				apu_map2 { trip = <&apu_t2>; cooling-device = <&cooling_device 6 8>; };
+				apu_map3 { trip = <&apu_t3>; cooling-device = <&cooling_device 8 10>; };
 			};
 		};
 		pl_thermal: pl-thermal {
-			polling-delay = <1000>; // Poll every 1000 ms
-			polling-delay-passive = <500>; // More frequent polling in passive state
-			thermal-sensors = <&temp_pl>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			polling-delay = <1000>;
+			polling-delay-passive = <500>;
+			thermal-sensors = <&temp_pl>;
 			trips {
 				pl_crit: pl_crit {
-					temperature = <95000>; // Critical temperature in millicelsius
-					hysteresis = <0>; 
+					temperature = <95000>;
+					hysteresis = <2000>;
 					type = "critical";
 				};
-
-				pl_active: pl_active {
-					temperature = <65000>; // Passive cooling starts at 85C
-					hysteresis = <10000>; // 5 degrees Celsius hysteresis
-					type = "active";
-				};
+				pl_t0: pl_t0 { temperature = <45000>; hysteresis = <3000>; type = "active"; };
+				pl_t1: pl_t1 { temperature = <55000>; hysteresis = <3000>; type = "active"; };
+				pl_t2: pl_t2 { temperature = <65000>; hysteresis = <3000>; type = "active"; };
+				pl_t3: pl_t3 { temperature = <75000>; hysteresis = <3000>; type = "active"; };
 			};
-
 			cooling-maps {
-				pl_map0 {
-					trip = <&pl_active>;
-					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
-				};
+				pl_map0 { trip = <&pl_t0>; cooling-device = <&cooling_device 0 3>; };
+				pl_map1 { trip = <&pl_t1>; cooling-device = <&cooling_device 3 6>; };
+				pl_map2 { trip = <&pl_t2>; cooling-device = <&cooling_device 6 8>; };
+				pl_map3 { trip = <&pl_t3>; cooling-device = <&cooling_device 8 10>; };
 			};
 		};
 		ps_thermal: ps-thermal {
-			polling-delay = <1000>; // Poll every 1000 ms
-			polling-delay-passive = <500>; // More frequent polling in passive state
-			thermal-sensors = <&temp_ps>;//, <&temp_pl 0>, <&temp_lpd 0>;
+			polling-delay = <1000>;
+			polling-delay-passive = <500>;
+			thermal-sensors = <&temp_ps>;
 			trips {
 				ps_crit: ps_crit {
-					temperature = <95000>; // Critical temperature in millicelsius
-					hysteresis = <0>; 
+					temperature = <95000>;
+					hysteresis = <2000>;
 					type = "critical";
 				};
-
-				ps_active: ps_active {
-					temperature = <65000>; // Passive cooling starts at 85C
-					hysteresis = <10000>; // 5 degrees Celsius hysteresis
-					type = "active";
-				};
+				ps_t0: ps_t0 { temperature = <45000>; hysteresis = <3000>; type = "active"; };
+				ps_t1: ps_t1 { temperature = <55000>; hysteresis = <3000>; type = "active"; };
+				ps_t2: ps_t2 { temperature = <65000>; hysteresis = <3000>; type = "active"; };
+				ps_t3: ps_t3 { temperature = <75000>; hysteresis = <3000>; type = "active"; };
 			};
-
 			cooling-maps {
-				ps_map0 {
-					trip = <&ps_active>;
-					cooling-device = <&cooling_device 0 1>; // Activate fan at active trip point
-				};
+				ps_map0 { trip = <&ps_t0>; cooling-device = <&cooling_device 0 3>; };
+				ps_map1 { trip = <&ps_t1>; cooling-device = <&cooling_device 3 6>; };
+				ps_map2 { trip = <&ps_t2>; cooling-device = <&cooling_device 6 8>; };
+				ps_map3 { trip = <&ps_t3>; cooling-device = <&cooling_device 8 10>; };
 			};
 		};
 	};
