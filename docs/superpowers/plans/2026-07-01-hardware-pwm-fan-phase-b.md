@@ -220,7 +220,27 @@ git add -A && git commit -q -m "axi_pwm: package AXI4-Lite PWM IP (CTRL/PERIOD/D
 
 ---
 
-### Task 3: Swap `fan_gpio` → `axi_pwm` in `design_1`, synthesize, export XSA
+## Synthesis speed strategy (single-track: OOC cache + incremental impl)
+
+The TRD has 31 cells incl. slow blocks (PL `axi_ethernet`+DMA, PL `ddr4`,
+`mipi_csi2_rx`, `v_proc_ss`, `v_frmbuf_wr`). A *from-scratch* build is 30–60 min, but a
+**one-IP change is not from-scratch**:
+
+- **OOC IP synth is cached per-IP.** In the BD flow each IP synthesizes out-of-context to
+  its own checkpoint. Changing only `axi_pwm` re-runs just that IP's (tiny) OOC synth; the
+  heavy IPs stay "Complete" and are reused. The AlinxMigrated project already has these
+  runs cached, so we never re-synthesize video/ddr4/ethernet.
+- **Incremental implementation** handles the remaining long pole (place & route). With the
+  stock impl as a reference checkpoint, unchanged logic keeps its placement/routing and
+  only the swapped fan logic is re-placed/routed. `axi_pwm` ≈ `axi_gpio` footprint (one
+  AXI-Lite slave, one output pin) → a tiny perturbation.
+
+Net: iterate directly on the **real full TRD** — no separate minimal design to build or
+keep in sync (rejected as convoluted). Expect ~10–15 min per fan-only iteration
+(`axi_pwm` OOC + top synth + incremental impl + bitstream), with `-jobs 16` and
+`Flow_RuntimeOptimized` (the fan PWM has trivial timing, so no aggressive closure needed).
+
+### Task 3: Swap `fan_gpio` → `axi_pwm` in `design_1` (OOC cache + incremental impl)
 
 **Files:**
 - Create: `/home/orencollaco/GitHub/axu3eg-pwm-ip/tcl/modify_design.tcl`
@@ -279,17 +299,27 @@ save_bd_design
 Run: `vivado -mode batch -source tcl/modify_design.tcl 2>&1 | tail -20`
 Expected: `validate_bd_design` reports no critical errors. If `fan_tri_o` was a 1-bit vector (`[0:0]`), adjust `create_bd_port -dir O -from 0 -to 0 fan_tri_o` to keep the XDC `fan_tri_o[0]` name.
 
-- [ ] **Step 3: Synthesize + implement + export XSA (long — background it)**
+- [ ] **Step 3: Synthesize + implement (incremental) + export XSA (background it)**
 
 ```tcl
-# append to modify_design.tcl (or separate build.tcl)
-reset_run synth_1
-launch_runs impl_1 -to_step write_bitstream -jobs 8
+# build.tcl — OOC IP synth is cached (only axi_pwm re-synths); impl is incremental.
+# Set an incremental reference from the stock implemented checkpoint if present.
+set ref /home/orencollaco/GitHub/AlinxMigrated/axu3eg_trd.runs/impl_1/design_1_wrapper_routed.dcp
+if {[file exists $ref]} {
+  set_property incremental_checkpoint $ref [get_runs impl_1]
+}
+set_property strategy Flow_RuntimeOptimized [get_runs synth_1]
+set_property strategy Flow_RuntimeOptimized [get_runs impl_1]
+launch_runs impl_1 -to_step write_bitstream -jobs 16
 wait_on_run impl_1
 write_hw_platform -fixed -include_bit -force -file /home/orencollaco/GitHub/AlinxMigrated/axu3eg_trd.xsa
 ```
 Run in background: `vivado -mode batch -source tcl/build.tcl > /tmp/vivado_build.log 2>&1 &`
-Expected (may take 30–60+ min for the TRD): `impl_1` completes, `axu3eg_trd.xsa` written. Verify: `grep -c "write_hw_platform.*Completed\|Bitstream generation completed" /tmp/vivado_build.log`.
+Expected: **first** build after the swap ~20–30 min (only `axi_pwm` OOC re-synths, heavy IPs
+reused; one incremental impl); **subsequent** fan-only iterations ~10–15 min. `axu3eg_trd.xsa`
+written. Verify: `grep -iE "Bitstream generation completed|write_hw_platform.*Complete" /tmp/vivado_build.log`.
+Incremental impl reuse is reported in the log as `% of cells reused` — expect a high figure
+(the fan is a tiny fraction of the device).
 
 - [ ] **Step 4: Sanity-check the XSA contains the fan_tri_o/axi_pwm**
 
