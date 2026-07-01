@@ -1,0 +1,49 @@
+#!/bin/bash
+# axu-mon - simple live sensor monitor for the Alinx AXU3EG board.
+# SoC temps, fan PWM (from the axi_pwm PL peripheral), CPU load, memory.
+# Usage: axu-mon [--once]     (q quits; --once prints a single frame)
+
+ESC=$'\033'; R="${ESC}[0m"
+bar() { # value min max width
+  local v=$1 lo=$2 hi=$3 w=$4 f i s=""
+  ((v<lo)) && v=$lo; ((v>hi)) && v=$hi
+  f=$(( (v-lo)*w/(hi-lo) ))
+  for ((i=0;i<w;i++)); do ((i<f)) && s+="#" || s+=" "; done
+  printf '%s' "$s"
+}
+tcol() { (($1>=80)) && { printf '%s' "${ESC}[31m"; return; }; \
+         (($1>=60)) && { printf '%s' "${ESC}[33m"; return; }; printf '%s' "${ESC}[32m"; }
+
+frame() {
+  printf '%s' "${ESC}[H${ESC}[2J"
+  local up upm ups load
+  up=$(cut -d. -f1 /proc/uptime); upm=$((up/60)); ups=$((up%60))
+  load=$(cut -d' ' -f1-3 /proc/loadavg)
+  printf " ${ESC}[1mAXU3EG sensors${R}   up %dm%02ds   load %s   (q quits)\n" "$upm" "$ups" "$load"
+  printf ' ---------------------------------------------------------------\n'
+  local z t n c
+  for z in /sys/class/thermal/thermal_zone*; do
+    t=$(( $(cat "$z/temp")/1000 )); n=$(cat "$z/type"); c=$(tcol "$t")
+    printf "  %-11s %s%3d C%s [%s%s%s]\n" "$n" "$c" "$t" "$R" "$c" "$(bar "$t" 30 95 40)" "$R"
+  done
+  printf ' ---------------------------------------------------------------\n'
+  local st mx per duty pct khz lbl
+  st=$(cat /sys/class/thermal/cooling_device0/cur_state)
+  mx=$(cat /sys/class/thermal/cooling_device0/max_state)
+  per=$(( $(devmem 0x80090004 32) )); duty=$(( $(devmem 0x80090008 32) ))
+  ((per>0)) && pct=$((duty*100/per)) || pct=0
+  ((per>0)) && khz=$((200000/per)) || khz=0
+  lbl="OFF"; ((duty>0)) && lbl="ON "
+  printf "  Fan   state %s/%s   duty %3d%%  %s [%s]\n" "$st" "$mx" "$pct" "$lbl" "$(bar "$pct" 0 100 40)"
+  printf "  PWM   %d kHz  period %d cyc  duty_reg %d cyc\n" "$khz" "$per" "$duty"
+  printf ' ---------------------------------------------------------------\n'
+  local mt
+  mt=$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf "%d/%d", (t-a)/1024, t/1024}' /proc/meminfo)
+  printf "  Mem   %s MB    CPU %s cores\n" "$mt" "$(nproc)"
+}
+
+[ "$1" = "--once" ] && { frame; exit 0; }
+printf '%s' "${ESC}[?25l"
+trap 'printf "%s" "${ESC}[?25h${R}"; exit 0' INT TERM
+while :; do frame; read -t 1 -n 1 k; [ "$k" = "q" ] && break; done
+printf '%s' "${ESC}[?25h${R}"

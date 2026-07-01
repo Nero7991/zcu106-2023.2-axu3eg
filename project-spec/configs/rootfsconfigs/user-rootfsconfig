@@ -12,3 +12,4 @@ CONFIG_simple-gpio-fan
 CONFIG_soft-pwm-fan
 CONFIG_pl-pwm-fan
 
+CONFIG_axu-mon

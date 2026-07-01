@@ -4084,6 +4084,7 @@ CONFIG_gstreamer-vcu-examples=y
 # CONFIG_gstreamer-vcu-notebooks is not set
 # CONFIG_peekpoke is not set
 CONFIG_pl-pwm-fan=y
+CONFIG_axu-mon=y
 CONFIG_simple-gpio-fan=y
 CONFIG_soft-pwm-fan=y
 CONFIG_zynqmp-pssysmon-temp=y
