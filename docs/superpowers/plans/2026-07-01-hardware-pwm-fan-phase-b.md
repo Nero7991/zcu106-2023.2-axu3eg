@@ -20,7 +20,7 @@
 - Keep the rest of `design_1` (rs485, leds, keys, video, ethernet) intact — modify only the fan path.
 - PWM register map (custom IP `axi_pwm`, base stays `0x80090000`, 64 KB segment):
   - `0x00 CTRL` — bit0 `ENABLE` (1 = run), bit1 `POLARITY` (1 = invert output; set to 1 for active-low fan). Reset = 0 (output holds the off level).
-  - `0x04 PERIOD` — carrier period in PL clock cycles. For 25 kHz at 100 MHz = `4000`.
+  - `0x04 PERIOD` — carrier period in PL clock cycles. For 25 kHz at 200 MHz = `8000` (PL clock is 200 MHz, confirmed).
   - `0x08 DUTY` — high-time in PL clock cycles, `0..PERIOD` (before polarity inversion).
   - `0x0C STATUS` — read-only, bit0 = current raw PWM level (for debug).
 
@@ -302,24 +302,32 @@ Expected: `validate_bd_design` reports no critical errors. If `fan_tri_o` was a 
 - [ ] **Step 3: Synthesize + implement (incremental) + export XSA (background it)**
 
 ```tcl
-# build.tcl — OOC IP synth is cached (only axi_pwm re-synths); impl is incremental.
-# Set an incremental reference from the stock implemented checkpoint if present.
-set ref /home/orencollaco/GitHub/AlinxMigrated/axu3eg_trd.runs/impl_1/design_1_wrapper_routed.dcp
+# build.tcl — OOC IP synth is cached (only axi_pwm re-synths).
+# GOTCHA: the incremental reference DCP must live OUTSIDE the run directory.
+# reset_run impl_1 (or a cascaded reset from reset_run synth_1) DELETES anything
+# inside axu3eg_trd.runs/impl_1 — including impl_1/design_1_wrapper_routed.dcp — so
+# referencing it there fails with [Vivado 12-3280] "does not exist" mid-build.
+# After any successful impl, copy the routed DCP to a stable path and reference THAT.
+set ref /home/orencollaco/GitHub/AlinxMigrated/incremental_ref_routed.dcp
+generate_target all [get_files design_1.bd]
+reset_run synth_1
 if {[file exists $ref]} {
-  set_property incremental_checkpoint $ref [get_runs impl_1]
+  set_property incremental_checkpoint $ref [get_runs impl_1]   ;# out-of-run-dir copy: survives reset
 }
-set_property strategy Flow_RuntimeOptimized [get_runs synth_1]
-set_property strategy Flow_RuntimeOptimized [get_runs impl_1]
+# Do NOT force Flow_RuntimeOptimized on a FULL (non-incremental) build — the stock
+# default strategy is what closes DDR4/video timing. RuntimeOptimized is fine ONLY
+# once incremental reuse is high (the fan change doesn't touch those paths).
 launch_runs impl_1 -to_step write_bitstream -jobs 16
 wait_on_run impl_1
+# refresh the out-of-run-dir reference for next time
+file copy -force [get_property DIRECTORY [get_runs impl_1]]/design_1_wrapper_routed.dcp $ref
 write_hw_platform -fixed -include_bit -force -file /home/orencollaco/GitHub/AlinxMigrated/axu3eg_trd.xsa
 ```
 Run in background: `vivado -mode batch -source tcl/build.tcl > /tmp/vivado_build.log 2>&1 &`
-Expected: **first** build after the swap ~20–30 min (only `axi_pwm` OOC re-synths, heavy IPs
-reused; one incremental impl); **subsequent** fan-only iterations ~10–15 min. `axu3eg_trd.xsa`
-written. Verify: `grep -iE "Bitstream generation completed|write_hw_platform.*Complete" /tmp/vivado_build.log`.
-Incremental impl reuse is reported in the log as `% of cells reused` — expect a high figure
-(the fan is a tiny fraction of the device).
+Expected: the **first** build (no reference yet) is a full impl ~40 min; it writes
+`incremental_ref_routed.dcp`. **Subsequent** fan-only iterations reference that DCP and
+run incremental ~10–15 min. `axu3eg_trd.xsa` written. Verify:
+`grep -iE "Bitstream generation completed|BUILD_DONE_XSA_WRITTEN" /tmp/vivado_build.log`.
 
 - [ ] **Step 4: Sanity-check the XSA contains the fan_tri_o/axi_pwm**
 
@@ -366,7 +374,7 @@ In `system-user.dtsi`, replace the Phase A `cooling_device: gpio-fan { compatibl
 	cooling_device: fan-pwm@80090000 {
 		compatible = "user,axi-pwm-fan";
 		reg = <0x0 0x80090000 0x0 0x10000>;
-		pwm-period-cycles = <4000>;   /* 100 MHz / 25 kHz; adjust to PLCLK */
+		pwm-period-cycles = <8000>;   /* 200 MHz / 25 kHz */
 		min-duty-percent = <30>;
 		num-levels = <10>;
 		active-low;                   /* set CTRL.POLARITY=1 */
@@ -439,7 +447,7 @@ static int plpwm_probe(struct platform_device *pdev){
 	struct device *dev = &pdev->dev; struct device_node *np = dev->of_node;
 	struct plpwm *p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL); if(!p) return -ENOMEM;
 	p->base = devm_platform_ioremap_resource(pdev, 0); if (IS_ERR(p->base)) return PTR_ERR(p->base);
-	if (of_property_read_u32(np,"pwm-period-cycles",&p->period)) p->period = 4000;
+	if (of_property_read_u32(np,"pwm-period-cycles",&p->period)) p->period = 8000;
 	if (of_property_read_u32(np,"num-levels",&p->num_levels) || !p->num_levels) p->num_levels = 10;
 	if (of_property_read_u32(np,"min-duty-percent",&p->min_duty) || p->min_duty>100) p->min_duty = 30;
 	p->active_low = of_property_read_bool(np,"active-low");

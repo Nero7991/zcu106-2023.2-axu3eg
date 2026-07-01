@@ -10,4 +10,5 @@ CONFIG_gstreamer-vcu-notebooks
 CONFIG_zynqmp-pssysmon-temp
 CONFIG_simple-gpio-fan
 CONFIG_soft-pwm-fan
+CONFIG_pl-pwm-fan
 

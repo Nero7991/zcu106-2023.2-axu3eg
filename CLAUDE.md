@@ -42,10 +42,19 @@ Board connection during development:
      does not. Software PWM can't cleanly sustain 20 kHz (40k irq/s, jittery) -> this is
      why Phase B (hardware PWM) is REQUIRED for real proportional control, now de-risked
      since we've proven the fan responds at high frequency.
-   - **Phase B (hardware PWM in PL) — planned.** Reconstruct the Alinx `design_1`
-     Vivado project, replace `fan_gpio` with a PWM IP (AXI Timer or custom) at 25 kHz,
-     rebuild the bitstream. Reuses the same cooling-device interface. Blocked on the
-     missing FPGA source (see below). Also a warm-up for goal 3.
+   - **Phase B (hardware PWM in PL) — DONE and HARDWARE-VALIDATED (2026-07-01).**
+     Custom AXI4-Lite **`axi_pwm`** VHDL IP (25 kHz) replaces `fan_gpio` in `design_1`,
+     driving `fan_tri_o` (AA11). New kernel driver **`pl-pwm-fan`** (compatible
+     `user,axi-pwm-fan`) writes the IP's DUTY register from a device-tree
+     `cooling-levels` table; reuses the thermal framework. Tuned by ear to a quiet
+     curve: off < 50 C, 7% (self-starting floor) 50-70 C, ramp to 10% by 85 C, then
+     30/60/100% by 94 C, 95 C critical, 2 C hysteresis. Verified on hardware: driver
+     probes ("period=8000 states=0..7 levels 0 70 80 90 100 300 600 1000 per-mille"),
+     DUTY register matches each state, fan off at idle (41 C). 2-wire fan speed-controls
+     cleanly at 25 kHz (unlike Phase A's 100 Hz).
+     Repos: FPGA design in `~/GitHub/AlinxMigrated` (git "zcu106-axu3eg-hardware",
+     branch `hardware-pwm-fan`); reusable IP in `~/GitHub/axu3eg-pwm-ip`; plan in
+     `docs/superpowers/plans/2026-07-01-hardware-pwm-fan-phase-b.md`.
 3. **FUTURE — llama.c in VHDL:** Implement the [llama.c](https://github.com/karpathy/llama2.c)
    inference project in VHDL for a very small (FPGA-fitting) LLM, running in the PL.
 
@@ -146,10 +155,17 @@ Tools: PetaLinux at `~/petalinux/2023.2/settings.sh` (project `TMPDIR` on
 - **Serial:** `/dev/ttyUSB3` @ 115200 (see above). Board debug USB (CP2102N UART +
   FT232H JTAG) and Ethernet are cabled to this PC; the correct Ethernet port is the
   one on **GEM3 / `ethernet@ff0e0000`** (U-Boot `ping` confirmed).
-- **U-Boot network (persisted via `saveenv` to SPI flash):** board `ipaddr
-  192.168.97.47`, `serverip 192.168.97.169` (this host), `netmask 255.255.255.0`,
-  `bootcmd = tftpboot 0x10000000 ${serverip}:image.ub; bootm 0x10000000`. So a plain
-  power-on now auto-TFTP-boots the current `/tftpboot/image.ub` from this host.
+- **U-Boot network + bitstream (persisted via `saveenv` to SPI flash):** board `ipaddr
+  192.168.97.47`, `serverip 192.168.97.169` (this host), `netmask 255.255.255.0`. Since
+  Phase B the `bootcmd` also TFTP-loads the PL bitstream before the kernel:
+  `tftpboot 0x10000000 ${serverip}:system.bit.bin && fpga load 0 0x10000000 ${filesize}
+  && tftpboot 0x10000000 ${serverip}:image.ub && bootm 0x10000000`. So a plain power-on
+  loads the current `/tftpboot/{system.bit.bin,image.ub}` from this host — PL changes
+  deploy over TFTP too, no SD swap. (Bitstream is NOT in BOOT.BIN or image.ub here;
+  the FIT `.its` carries only kernel+FDT+ramdisk. `system.bit.bin` = raw bitstream from
+  `bootgen -arch zynqmp -image <bif> -process_bitstream bin`; U-Boot uses `fpga load`
+  for the raw .bin, `loadb` is for a .bit-with-header. To rebuild the bitstream: build
+  in the hardware repo, regenerate `system.bit.bin`, copy to `/tftpboot`, reboot.)
   (The old stale values were board `192.168.0.47`, server hardcoded `192.168.0.46`.)
 - **Login:** rootfs now built with `debug-tweaks` + `empty-root-password` +
   `serial-autologin-root` (set in `rootfs_config`), so the serial console
