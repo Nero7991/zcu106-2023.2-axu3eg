@@ -232,12 +232,14 @@
 	active-low;                   /* CTRL.POLARITY = 1 (physical 0 = fan on) */
 	/*
 	 * Per-mille duty per cooling state (index 0..7), tuned by ear:
-	 * 7% is the quiet, self-starting floor; near-silent until ~85 C then
-	 * ramps hard (noise acceptable once that hot).
-	 *   state:  0     1    2    3     4     5     6     7
-	 *   duty:  off   7%   8%   9%   10%   30%   60%  100%
+	 * 7% is the quiet, self-starting floor; idle sits at 7% (state 0 = 7%,
+	 * not off) so the governor flipping between state 0/1 around the 50 C
+	 * trip causes NO duty change -> no audible on/off cycling. Near-silent
+	 * until ~85 C then ramps hard (noise acceptable once that hot).
+	 *   state:  0    1    2    3     4     5     6     7
+	 *   duty:  7%   7%   8%   9%   10%   30%   60%  100%
 	 */
-	cooling-levels = <0 70 80 90 100 300 600 1000>;
+	cooling-levels = <70 70 80 90 100 300 600 1000>;
 	#cooling-cells = <2>;
 };
 
